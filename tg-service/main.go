@@ -36,7 +36,10 @@ type Email struct {
 	Body    string
 }
 
-var gmailToken TokenJSON
+var (
+	gmailToken  TokenJSON
+	oauthConfig *oauth2.Config
+)
 
 func main() {
 	// Load Gmail token
@@ -46,6 +49,33 @@ func main() {
 	}
 	if err := json.Unmarshal(tokenData, &gmailToken); err != nil {
 		log.Fatalf("Failed to parse token JSON: %v", err)
+	}
+
+	// Load OAuth credentials for token refresh
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		credFile, err := os.ReadFile("../credentials.json")
+		if err == nil {
+			var creds struct {
+				Web struct {
+					ClientID     string `json:"client_id"`
+					ClientSecret string `json:"client_secret"`
+				} `json:"web"`
+			}
+			if err := json.Unmarshal(credFile, &creds); err == nil {
+				clientID = creds.Web.ClientID
+				clientSecret = creds.Web.ClientSecret
+			}
+		}
+	}
+
+	oauthConfig = &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Endpoint:     google.Endpoint,
+		Scopes:       []string{gmail.GmailReadonlyScope},
 	}
 
 	// Get Telegram bot token
@@ -149,11 +179,26 @@ func ReadNetflixEmail(tokenJSON TokenJSON) (*Email, error) {
 		Expiry:       tokenJSON.Expiry,
 	}
 
-	config := &oauth2.Config{
-		Endpoint: google.Endpoint,
+	// TokenSource will auto-refresh when expired
+	tokenSource := oauthConfig.TokenSource(ctx, token)
+
+	// Get potentially refreshed token and save it
+	newToken, err := tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %v", err)
 	}
 
-	client := config.Client(ctx, token)
+	// If token was refreshed, update our stored token and save to file
+	if newToken.AccessToken != token.AccessToken {
+		gmailToken.AccessToken = newToken.AccessToken
+		gmailToken.Expiry = newToken.Expiry
+		if newToken.RefreshToken != "" {
+			gmailToken.RefreshToken = newToken.RefreshToken
+		}
+		saveToken()
+	}
+
+	client := oauth2.NewClient(ctx, tokenSource)
 
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
@@ -247,4 +292,17 @@ func decodeBase64(data string) string {
 		return ""
 	}
 	return string(decoded)
+}
+
+func saveToken() {
+	data, err := json.MarshalIndent(gmailToken, "", "  ")
+	if err != nil {
+		log.Printf("Failed to marshal token: %v", err)
+		return
+	}
+	if err := os.WriteFile("token.json", data, 0600); err != nil {
+		log.Printf("Failed to save token: %v", err)
+		return
+	}
+	log.Println("Token refreshed and saved")
 }

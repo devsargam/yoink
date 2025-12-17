@@ -1,0 +1,9 @@
+# JSON files (tokens, credentials)
+*.json
+
+# Keep example credentials for reference
+!credentials.example.json
+
+# Go binaries
+access-token-service/access-token-service
+tg-service/tg-service

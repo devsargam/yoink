@@ -56,18 +56,40 @@ func main() {
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 
 	if clientID == "" || clientSecret == "" {
-		credFile, err := os.ReadFile("../credentials.json")
-		if err == nil {
-			var creds struct {
-				Web struct {
-					ClientID     string `json:"client_id"`
-					ClientSecret string `json:"client_secret"`
-				} `json:"web"`
+		// Try multiple paths to find credentials.json
+		credPaths := []string{
+			"credentials.json",
+			"../credentials.json",
+		}
+
+		var credFile []byte
+		var credErr error
+		for _, path := range credPaths {
+			credFile, credErr = os.ReadFile(path)
+			if credErr == nil {
+				log.Printf("Loaded credentials from %s", path)
+				break
 			}
-			if err := json.Unmarshal(credFile, &creds); err == nil {
-				clientID = creds.Web.ClientID
-				clientSecret = creds.Web.ClientSecret
-			}
+		}
+
+		if credErr != nil {
+			log.Fatalf("Failed to load credentials.json from any location. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars, or ensure credentials.json exists: %v", credErr)
+		}
+
+		var creds struct {
+			Web struct {
+				ClientID     string `json:"client_id"`
+				ClientSecret string `json:"client_secret"`
+			} `json:"web"`
+		}
+		if err := json.Unmarshal(credFile, &creds); err != nil {
+			log.Fatalf("Failed to parse credentials.json: %v", err)
+		}
+		clientID = creds.Web.ClientID
+		clientSecret = creds.Web.ClientSecret
+
+		if clientID == "" || clientSecret == "" {
+			log.Fatal("credentials.json is missing client_id or client_secret in 'web' section")
 		}
 	}
 
@@ -185,7 +207,14 @@ func ReadNetflixEmail(tokenJSON TokenJSON) (*Email, error) {
 	// Get potentially refreshed token and save it
 	newToken, err := tokenSource.Token()
 	if err != nil {
-		return nil, fmt.Errorf("failed to refresh token: %v", err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "invalid_client") {
+			return nil, fmt.Errorf("Token expired! Your refresh token has expired (this happens after 7 days in testing mode). Please run access-token-service and get a new token from /login")
+		}
+		if strings.Contains(errStr, "invalid_grant") {
+			return nil, fmt.Errorf("Token revoked or expired. Please run access-token-service and get a new token from /login")
+		}
+		return nil, fmt.Errorf("Failed to refresh token: %v", err)
 	}
 
 	// If token was refreshed, update our stored token and save to file

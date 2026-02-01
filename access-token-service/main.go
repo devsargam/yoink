@@ -23,18 +23,40 @@ func init() {
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 
 	if clientID == "" || clientSecret == "" {
-		credFile, err := os.ReadFile("credentials.json")
-		if err == nil {
-			var creds struct {
-				Web struct {
-					ClientID     string `json:"client_id"`
-					ClientSecret string `json:"client_secret"`
-				} `json:"web"`
+		// Try multiple paths to find credentials.json
+		credPaths := []string{
+			"credentials.json",
+			"../credentials.json",
+		}
+
+		var credFile []byte
+		var credErr error
+		for _, path := range credPaths {
+			credFile, credErr = os.ReadFile(path)
+			if credErr == nil {
+				log.Printf("Loaded credentials from %s", path)
+				break
 			}
-			if err := json.Unmarshal(credFile, &creds); err == nil {
-				clientID = creds.Web.ClientID
-				clientSecret = creds.Web.ClientSecret
-			}
+		}
+
+		if credErr != nil {
+			log.Fatalf("Failed to load credentials.json. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars, or ensure credentials.json exists: %v", credErr)
+		}
+
+		var creds struct {
+			Web struct {
+				ClientID     string `json:"client_id"`
+				ClientSecret string `json:"client_secret"`
+			} `json:"web"`
+		}
+		if err := json.Unmarshal(credFile, &creds); err != nil {
+			log.Fatalf("Failed to parse credentials.json: %v", err)
+		}
+		clientID = creds.Web.ClientID
+		clientSecret = creds.Web.ClientSecret
+
+		if clientID == "" || clientSecret == "" {
+			log.Fatalf("credentials.json is missing client_id or client_secret in 'web' section")
 		}
 	}
 

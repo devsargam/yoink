@@ -8,9 +8,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -136,37 +136,31 @@ func emailsHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		return
 	}
 
-	code := extractNetflixCode(email.Body)
-	if code == "" {
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "No Netflix code found in email",
-		})
-		return
+	messageText := strings.TrimSpace(email.Body)
+	if messageText == "" {
+		messageText = strings.TrimSpace(email.Snippet)
+	}
+	if messageText == "" {
+		messageText = "Email body was empty."
 	}
 
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
-		Text:   code,
+		Text:   truncateTelegramMessage(messageText),
 	})
 }
 
-func extractNetflixCode(body string) string {
-	// Match 4-digit code that appears after "Enter this code" pattern
-	re := regexp.MustCompile(`(?:Enter this code[^\d]*|sign in\s*)(\d{4,6})`)
-	matches := re.FindStringSubmatch(body)
-	if len(matches) > 1 {
-		return matches[1]
-	}
+const telegramMessageLimit = 4096
 
-	// Fallback: look for standalone 4-6 digit number on its own line
-	re2 := regexp.MustCompile(`(?m)^\s*(\d{4,6})\s*$`)
-	matches2 := re2.FindStringSubmatch(body)
-	if len(matches2) > 1 {
-		return matches2[1]
+func truncateTelegramMessage(s string) string {
+	if utf8.RuneCountInString(s) <= telegramMessageLimit {
+		return s
 	}
-
-	return ""
+	runes := []rune(s)
+	if len(runes) <= telegramMessageLimit {
+		return s
+	}
+	return string(runes[:telegramMessageLimit-3]) + "..."
 }
 
 func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -257,8 +251,8 @@ func ReadNetflixEmail(tokenJSON TokenJSON) (*Email, error) {
 			}
 		}
 
-		// Check if from Netflix
-		if !strings.Contains(from, "info@account.netflix.com") {
+		// Check if email address mentions Netflix (case-insensitive)
+		if !strings.Contains(strings.ToLower(from), "netflix") {
 			continue
 		}
 

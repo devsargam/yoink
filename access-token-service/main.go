@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -112,6 +113,11 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persist token to a file so tg-service can use it without manual copy.
+	if err := saveToken(token); err != nil {
+		log.Printf("Failed to save token: %v", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"access_token":  token.AccessToken,
@@ -119,4 +125,47 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		"token_type":    token.TokenType,
 		"expiry":        token.Expiry,
 	})
+}
+
+func saveToken(token *oauth2.Token) error {
+	type tokenJSON struct {
+		AccessToken  string    `json:"access_token"`
+		RefreshToken string    `json:"refresh_token"`
+		TokenType    string    `json:"token_type"`
+		Expiry       time.Time `json:"expiry"`
+	}
+
+	payload := tokenJSON{
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		Expiry:       token.Expiry,
+	}
+
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal token: %w", err)
+	}
+
+	outputPath := os.Getenv("TOKEN_OUTPUT_PATH")
+	if outputPath == "" {
+		// Default to tg-service/token.json if present.
+		candidates := []string{
+			"../tg-service/token.json",
+			"token.json",
+		}
+		for _, path := range candidates {
+			if err := os.WriteFile(path, data, 0600); err == nil {
+				log.Printf("Saved token to %s", path)
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to write token to default paths")
+	}
+
+	if err := os.WriteFile(outputPath, data, 0600); err != nil {
+		return fmt.Errorf("write token to %s: %w", outputPath, err)
+	}
+	log.Printf("Saved token to %s", outputPath)
+	return nil
 }

@@ -20,6 +20,6 @@
 ## Usage
 
 1. Run `access-token-service` and authenticate with Google
-2. Save the token to `tg-service/token.json`
+2. The token is saved automatically to `tg-service/token.json` (or set `TOKEN_OUTPUT_PATH`)
 3. Run `tg-service` with your Telegram bot token
 4. Send `/emails` to your bot to get the latest Netflix OTP code
